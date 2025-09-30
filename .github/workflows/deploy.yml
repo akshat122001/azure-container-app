@@ -22,18 +22,27 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Build and push container image
+    - name: Build Docker image
       run: |
         docker build -t $REGISTRY_NAME.azurecr.io/my-web-app:${{ github.sha }} .
-        docker login $REGISTRY_NAME.azurecr.io -u ${{ secrets.ACR_USERNAME }} -p ${{ secrets.ACR_PASSWORD }}
+
+    - name: Login to Azure Container Registry
+      run: |
+        az acr login --name $REGISTRY_NAME
+
+    - name: Push Docker image to ACR
+      run: |
         docker push $REGISTRY_NAME.azurecr.io/my-web-app:${{ github.sha }}
 
     - name: Deploy to Azure Container Instances
       run: |
         # Delete existing container if it exists
-        az container delete --name $CONTAINER_NAME --resource-group $RESOURCE_GROUP --yes || true
+        az container delete --name $CONTAINER_NAME --resource-group $RESOURCE_GROUP --yes --no-wait || true
         
-        # Create new container
+        # Wait for cleanup
+        sleep 20
+        
+        # Create new container instance
         az container create \
           --resource-group $RESOURCE_GROUP \
           --name $CONTAINER_NAME \
@@ -42,9 +51,12 @@ jobs:
           --registry-password ${{ secrets.ACR_PASSWORD }} \
           --dns-name-label mywebapp-$(echo ${{ github.sha }} | cut -c1-8) \
           --ports 80 \
+          --cpu 1 \
+          --memory 1 \
           --restart-policy Always
 
-    - name: Get application URL
+    - name: Get Application URL
       run: |
-        echo "🎉 Your application is deployed at:"
+        echo "🎉 Application successfully deployed!"
+        echo "🌐 Your application is available at:"
         az container show --resource-group $RESOURCE_GROUP --name $CONTAINER_NAME --query ipAddress.fqdn -o tsv
