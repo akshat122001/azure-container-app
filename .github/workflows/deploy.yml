@@ -1,0 +1,50 @@
+name: Build and Deploy to Azure Container Instances
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  REGISTRY_NAME: myappregistry2001
+  RESOURCE_GROUP: my-container-app-rg
+  CONTAINER_NAME: my-web-app-container
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build and push container image
+      run: |
+        docker build -t $REGISTRY_NAME.azurecr.io/my-web-app:${{ github.sha }} .
+        docker login $REGISTRY_NAME.azurecr.io -u ${{ secrets.ACR_USERNAME }} -p ${{ secrets.ACR_PASSWORD }}
+        docker push $REGISTRY_NAME.azurecr.io/my-web-app:${{ github.sha }}
+
+    - name: Deploy to Azure Container Instances
+      run: |
+        # Delete existing container if it exists
+        az container delete --name $CONTAINER_NAME --resource-group $RESOURCE_GROUP --yes || true
+        
+        # Create new container
+        az container create \
+          --resource-group $RESOURCE_GROUP \
+          --name $CONTAINER_NAME \
+          --image $REGISTRY_NAME.azurecr.io/my-web-app:${{ github.sha }} \
+          --registry-username ${{ secrets.ACR_USERNAME }} \
+          --registry-password ${{ secrets.ACR_PASSWORD }} \
+          --dns-name-label mywebapp-$(echo ${{ github.sha }} | cut -c1-8) \
+          --ports 80 \
+          --restart-policy Always
+
+    - name: Get application URL
+      run: |
+        echo "🎉 Your application is deployed at:"
+        az container show --resource-group $RESOURCE_GROUP --name $CONTAINER_NAME --query ipAddress.fqdn -o tsv
